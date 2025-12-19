@@ -19,6 +19,9 @@ from claude_agent_sdk import (
 from airport_graph_agent.db import clear_database, init_schema, verify_connection
 from airport_graph_agent.tools import ALL_TOOLS, airport_graph_server
 
+# Use Opus for better image identification accuracy
+AGENT_MODEL = "claude-opus-4-20250514"
+
 # System prompt for the airport diagram analysis agent
 SYSTEM_PROMPT = """You are an expert at analyzing FAA airport diagrams and extracting their structure into a graph database.
 
@@ -169,8 +172,9 @@ async def process_diagram(
         print(f"Processing {airport} diagram: {image_path}")
         print("Starting agent...")
 
-    # Configure agent options
+    # Configure agent options - use Opus for better image identification
     options = ClaudeAgentOptions(
+        model=AGENT_MODEL,
         mcp_servers={"airport-graph": airport_graph_server},
         allowed_tools=get_tool_names(),
         system_prompt=SYSTEM_PROMPT,

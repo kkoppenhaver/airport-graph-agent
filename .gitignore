@@ -46,3 +46,5 @@ htmlcov/
 diagrams/*.png
 diagrams/*.pdf
 !diagrams/.gitkeep
+
+.DS_Store

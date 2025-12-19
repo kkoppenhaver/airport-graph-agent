@@ -23,14 +23,57 @@ def main():
 @main.command()
 @click.argument("diagram", type=click.Path(exists=True))
 @click.option("--airport", "-a", required=True, help="ICAO airport code (e.g., KDPA)")
-def process(diagram: str, airport: str):
+@click.option("--keep-existing", "-k", is_flag=True, help="Don't clear existing data for this airport")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress verbose output")
+def process(diagram: str, airport: str, keep_existing: bool, quiet: bool):
     """Process an airport diagram and create a graph database.
 
     DIAGRAM: Path to the PNG airport diagram file.
     """
-    click.echo(f"Processing diagram: {diagram} for airport: {airport}")
-    # TODO: Implement agent processing
-    click.echo("Agent processing not yet implemented.")
+    from airport_graph_agent.agent import run_process_diagram
+
+    airport = airport.upper()
+
+    if not quiet:
+        click.echo(f"Processing diagram: {diagram}")
+        click.echo(f"Airport: {airport}")
+        if not keep_existing:
+            click.echo(f"(Existing data for {airport} will be cleared)")
+        click.echo("")
+
+    try:
+        results = run_process_diagram(
+            image_path=diagram,
+            airport=airport,
+            clear_existing=not keep_existing,
+            verbose=not quiet,
+        )
+
+        if results.get("completed"):
+            click.echo("")
+            click.echo(f"✓ Processing complete for {airport}")
+            click.echo(f"  Tool calls: {results['tool_calls']}")
+
+            # Show final stats
+            graph_stats = get_graph_stats(airport)
+            click.echo(f"  Nodes created: {graph_stats['total_nodes']}")
+            click.echo(f"  Connections created: {graph_stats['total_connections']}")
+        else:
+            click.echo("")
+            click.echo(f"✗ Processing incomplete")
+            if "error" in results:
+                click.echo(f"  Error: {results['error']}")
+            raise SystemExit(1)
+
+    except FileNotFoundError as e:
+        click.echo(f"✗ {e}")
+        raise SystemExit(1)
+    except RuntimeError as e:
+        click.echo(f"✗ {e}")
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(f"✗ Unexpected error: {e}")
+        raise SystemExit(1)
 
 
 @main.command()

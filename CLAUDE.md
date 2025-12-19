@@ -1,0 +1,1 @@
+Make sure to look at AGENTS.md for information on this project.

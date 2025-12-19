@@ -8,7 +8,11 @@ import base64
 from pathlib import Path
 from typing import Any
 
+from anthropic import Anthropic
 from claude_agent_sdk import tool
+
+# Use Opus for verification tasks (more accurate)
+VERIFICATION_MODEL = "claude-opus-4-20250514"
 
 
 @tool(
@@ -237,5 +241,250 @@ async def report_analysis_progress(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@tool(
+    "trace_paths_from_point",
+    "Trace all taxiway paths from a starting point to discover connections and potentially missed taxiways. Uses Claude Opus for high-accuracy verification. Use this after initial identification to ensure complete coverage.",
+    {
+        "type": "object",
+        "properties": {
+            "image_path": {
+                "type": "string",
+                "description": "Path to the PNG airport diagram file"
+            },
+            "starting_point": {
+                "type": "string",
+                "description": "Name of the starting point (e.g., 'Runway 10', 'Runway 20R', 'Main Ramp')"
+            },
+            "known_taxiways": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of taxiways already identified (e.g., ['A', 'B', 'C', 'W'])"
+            }
+        },
+        "required": ["image_path", "starting_point", "known_taxiways"]
+    }
+)
+async def trace_paths_from_point(args: dict[str, Any]) -> dict[str, Any]:
+    """Call Opus to trace paths from a starting point and discover taxiways."""
+    image_path = args["image_path"]
+    starting_point = args["starting_point"]
+    known_taxiways = args.get("known_taxiways", [])
+
+    try:
+        path = Path(image_path)
+        if not path.exists():
+            return {
+                "content": [{"type": "text", "text": f"Error: Image file not found: {image_path}"}],
+                "is_error": True
+            }
+
+        # Read and encode the image
+        suffix = path.suffix.lower()
+        media_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+            suffix, "image/png"
+        )
+
+        with open(path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        known_list = ", ".join(known_taxiways) if known_taxiways else "none yet"
+
+        tracing_prompt = f"""## Path Tracing Task
+
+Starting from: **{starting_point}**
+Already known taxiways: {known_list}
+
+### Instructions:
+1. Locate {starting_point} on the diagram
+2. Find ALL grey taxiway paths that connect to or lead away from this point
+3. For EACH grey path, trace it and note:
+   - The taxiway letter/name (look for labels on or near the grey path)
+   - Where it leads (another taxiway intersection, runway, ramp, etc.)
+   - Any OTHER taxiways it intersects along the way
+
+4. Pay special attention to:
+   - Small connector taxiways that might be easy to miss
+   - Taxiways at the edges/corners of the diagram
+   - Any taxiway letters NOT in the known list above
+
+### Report Format:
+For each path traced, report:
+```
+PATH: [Taxiway Letter]
+  From: {starting_point}
+  Direction: [N/S/E/W/etc]
+  Passes through: [intersections]
+  Ends at: [destination]
+  NEW taxiway? [Yes if not in known list]
+```
+
+### Summary (REQUIRED):
+At the end, provide:
+1. **ALL taxiways found from {starting_point}**: [list]
+2. **NEW taxiways discovered** (not in known list): [list or "none"]
+3. **Suggested next starting point**: [suggestion]"""
+
+        # Call Opus for high-accuracy path tracing
+        client = Anthropic()
+        response = client.messages.create(
+            model=VERIFICATION_MODEL,
+            max_tokens=3000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_data,
+                            },
+                        },
+                        {"type": "text", "text": tracing_prompt},
+                    ],
+                }
+            ],
+        )
+
+        result_text = response.content[0].text
+        return {
+            "content": [{
+                "type": "text",
+                "text": f"[Path Tracing via Opus from {starting_point}]\n\n{result_text}"
+            }]
+        }
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error during path tracing: {str(e)}"}],
+            "is_error": True
+        }
+
+
+@tool(
+    "scan_diagram_region",
+    "Scan a specific region of the diagram for taxiways. Uses Claude Opus for high-accuracy verification. Use this to systematically check different areas for missed taxiways.",
+    {
+        "type": "object",
+        "properties": {
+            "image_path": {
+                "type": "string",
+                "description": "Path to the PNG airport diagram file"
+            },
+            "region": {
+                "type": "string",
+                "enum": ["top-left", "top-right", "bottom-left", "bottom-right", "center", "left-edge", "right-edge", "top-edge", "bottom-edge"],
+                "description": "Which region of the diagram to focus on"
+            },
+            "known_taxiways": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of taxiways already identified"
+            }
+        },
+        "required": ["image_path", "region", "known_taxiways"]
+    }
+)
+async def scan_diagram_region(args: dict[str, Any]) -> dict[str, Any]:
+    """Call Opus to scan a specific region for taxiways."""
+    image_path = args["image_path"]
+    region = args["region"]
+    known_taxiways = args.get("known_taxiways", [])
+
+    try:
+        path = Path(image_path)
+        if not path.exists():
+            return {
+                "content": [{"type": "text", "text": f"Error: Image file not found: {image_path}"}],
+                "is_error": True
+            }
+
+        suffix = path.suffix.lower()
+        media_type = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+            suffix, "image/png"
+        )
+
+        with open(path, "rb") as f:
+            image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        known_list = ", ".join(sorted(known_taxiways)) if known_taxiways else "none"
+
+        region_descriptions = {
+            "top-left": "the TOP-LEFT quadrant",
+            "top-right": "the TOP-RIGHT quadrant",
+            "bottom-left": "the BOTTOM-LEFT quadrant",
+            "bottom-right": "the BOTTOM-RIGHT quadrant",
+            "center": "the CENTER of the diagram",
+            "left-edge": "along the LEFT EDGE",
+            "right-edge": "along the RIGHT EDGE",
+            "top-edge": "along the TOP EDGE",
+            "bottom-edge": "along the BOTTOM EDGE",
+        }
+
+        scan_prompt = f"""## Region Scan Task
+
+Focus Area: **{region_descriptions[region]}**
+Already known taxiways: {known_list}
+
+### Instructions:
+1. Focus ONLY on {region_descriptions[region]} of this diagram
+2. Look for ANY grey taxiway paths in this region
+3. For each taxiway path found, note its letter/name
+4. Specifically look for taxiway letters that are NOT in the known list
+
+### What to look for:
+- Grey outlined paths (taxiways)
+- Letter labels on or near the paths (A, B, C, W, W1, Z, etc.)
+- Small connector taxiways
+- Taxiways that might be partially visible at region edges
+
+### Report (REQUIRED format):
+1. **Taxiways visible in {region_descriptions[region]}**: [list all]
+2. **Already known**: [which ones from the known list]
+3. **NEW taxiways found**: [any not in known list, or "none"]"""
+
+        # Call Opus for high-accuracy region scanning
+        client = Anthropic()
+        response = client.messages.create(
+            model=VERIFICATION_MODEL,
+            max_tokens=1500,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_data,
+                            },
+                        },
+                        {"type": "text", "text": scan_prompt},
+                    ],
+                }
+            ],
+        )
+
+        result_text = response.content[0].text
+        return {
+            "content": [{
+                "type": "text",
+                "text": f"[Region Scan via Opus: {region}]\n\n{result_text}"
+            }]
+        }
+    except Exception as e:
+        return {
+            "content": [{"type": "text", "text": f"Error during region scan: {str(e)}"}],
+            "is_error": True
+        }
+
+
 # Export all analysis tools
-ANALYSIS_TOOLS = [get_analysis_guidance, load_diagram_image, report_analysis_progress]
+ANALYSIS_TOOLS = [
+    get_analysis_guidance,
+    load_diagram_image,
+    report_analysis_progress,
+    trace_paths_from_point,
+    scan_diagram_region,
+]

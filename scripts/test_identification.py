@@ -17,7 +17,6 @@ IDENTIFICATION_PROMPT = """Analyze this FAA airport diagram and identify the fol
 ### Runways
 - **Appearance**: Solid BLACK elongated shapes (the darkest elements on the diagram)
 - **Labels**: Runway numbers appear as TEXT at each END of the black shape
-- **IMPORTANT**: Look for the RUNWAY LEGEND box (usually on the right side) which lists all runways
 
 ### Taxiways
 - **Appearance**: GREY outlined paths (lighter than runways, not solid black)
